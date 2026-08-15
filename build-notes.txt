@@ -1,0 +1,6 @@
+Package name: com.kbmovies.app
+Website: https://wordpress-1655282-6615038.cloudwaysapps.com/
+Version: 1.3.0 (code 4)
+Notifications: enabled
+Normal app orientation: portrait
+Offline/Pull refresh: provided by PWA plugin v1.5

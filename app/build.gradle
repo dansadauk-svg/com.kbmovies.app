@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+    id 'com.google.gms.google-services'
+}
+
+android {
+    namespace 'com.kbmovies.app'
+    compileSdk 36
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    defaultConfig {
+        applicationId 'com.kbmovies.app'
+        minSdk 23
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    signingConfigs {
+        release {
+            storeFile file('../kb-movies-release-key.jks')
+            storePassword System.getenv('KB_KEYSTORE_PASSWORD')
+            keyAlias System.getenv('KB_KEY_ALIAS') ?: 'kb_movies'
+            keyPassword System.getenv('KB_KEY_PASSWORD')
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+        }
+    }
+}
+
+configurations.configureEach {
+    resolutionStrategy {
+        force 'androidx.core:core:1.13.1'
+    }
+}
+
+dependencies {
+    implementation 'com.google.firebase:firebase-messaging:24.0.0'
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+}

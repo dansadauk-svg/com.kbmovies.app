@@ -1,0 +1,34 @@
+KB MOVIES ANDROID 1.0.0
+
+APP
+Name: KB Movies
+Package: com.kbmovies.app
+Website: https://wordpress-1655282-6615038.cloudwaysapps.com/
+Firebase project: kbmovies-9efc4
+
+GITHUB BUILD
+1. Create a private GitHub repository.
+2. Upload this project's contents to the repository root.
+3. Open Settings > Secrets and variables > Actions.
+4. Create KB_KEYSTORE_BASE64 using the content of KB_KEYSTORE_BASE64.txt from the private signing backup.
+5. Create KB_KEYSTORE_PASSWORD using the value in SIGNING-CREDENTIALS.txt.
+6. Create KB_KEY_PASSWORD using the value in SIGNING-CREDENTIALS.txt.
+7. Open Actions > Build KB Movies APK and AAB > Run workflow.
+8. Download the APK and AAB artifacts when the workflow finishes.
+
+PUSH NOTIFICATIONS
+1. Configure your WordPress push plugin with a Firebase service-account JSON from the kbmovies-9efc4 project.
+2. Confirm this endpoint responds on the website:
+   https://wordpress-1655282-6615038.cloudwaysapps.com/wp-json/mkpush/v2/register-token
+3. Install the APK and approve notification permission.
+4. Send a Firebase test notification to the installed device.
+
+APP LINKS
+Upload assetlinks.json to:
+https://wordpress-1655282-6615038.cloudwaysapps.com/.well-known/assetlinks.json
+
+PAYMENTS
+HTTP and HTTPS checkout pages stay inside the app. Android-specific bank-app links still open the matching Android app when available.
+
+DOWNLOADS
+Movie download links use Android Download Manager and appear in the device Downloads folder.
