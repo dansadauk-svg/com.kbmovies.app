@@ -3,7 +3,7 @@ KB MOVIES ANDROID 1.0.0
 APP
 Name: KB Movies
 Package: com.kbmovies.app
-Website: https://wordpress-1655282-6615038.cloudwaysapps.com/
+Website: https://kbmovies.ng/
 Firebase project: kbmovies-9efc4
 
 GITHUB BUILD
@@ -19,13 +19,13 @@ GITHUB BUILD
 PUSH NOTIFICATIONS
 1. Configure your WordPress push plugin with a Firebase service-account JSON from the kbmovies-9efc4 project.
 2. Confirm this endpoint responds on the website:
-   https://wordpress-1655282-6615038.cloudwaysapps.com/wp-json/mkpush/v2/register-token
+   https://kbmovies.ng/wp-json/mkpush/v2/register-token
 3. Install the APK and approve notification permission.
 4. Send a Firebase test notification to the installed device.
 
 APP LINKS
 Upload assetlinks.json to:
-https://wordpress-1655282-6615038.cloudwaysapps.com/.well-known/assetlinks.json
+https://kbmovies.ng/.well-known/assetlinks.json
 
 PAYMENTS
 HTTP and HTTPS checkout pages stay inside the app. Android-specific bank-app links still open the matching Android app when available.

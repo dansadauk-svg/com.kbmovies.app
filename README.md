@@ -6,8 +6,8 @@ Native Android WebView app for KB Movies.
 
 - App name: KB Movies
 - Package: `com.kbmovies.app`
-- Version: `1.0.0` (`versionCode 1`)
-- Website: `https://wordpress-1655282-6615038.cloudwaysapps.com/`
+- Version: `2.7.0` (`versionCode 17`)
+- Website: `https://kbmovies.ng/`
 - Minimum Android: 6.0, API 23
 - Target Android: API 36
 - Push service: Firebase Cloud Messaging
@@ -58,6 +58,6 @@ Never upload the signing key or its passwords to the repository.
 
 The app registers Firebase tokens at:
 
-`https://wordpress-1655282-6615038.cloudwaysapps.com/wp-json/mkpush/v2/register-token`
+`https://kbmovies.ng/wp-json/mkpush/v2/register-token`
 
 Your WordPress push plugin must use the Firebase service-account credentials from the `kbmovies-9efc4` Firebase project.

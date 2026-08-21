@@ -45,13 +45,16 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import com.google.firebase.messaging.FirebaseMessaging;
 
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final String TAG = "KBMoviesMain";
     private static final int REQ_POST_NOTIFICATIONS = 701;
     private static final int REQ_FILE_CHOOSER = 702;
-    private static final String HOME_URL = "https://wordpress-1655282-6615038.cloudwaysapps.com/?source=android_app";
+    private static final String HOME_URL = "https://kbmovies.ng/?source=android_app";
+    private static final String SITE_ORIGIN = "https://kbmovies.ng/";
 
     private WebView webView;
     private SwipeRefreshLayout swipeRefreshLayout;
@@ -177,9 +180,24 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        logoParams.width = dp(280);
-        logoParams.bottomMargin = dp(28);
+        logoParams.width = dp(156);
+        logoParams.height = dp(156);
+        logoParams.bottomMargin = dp(10);
         splashContent.addView(logo, logoParams);
+
+        TextView splashTagline = new TextView(this);
+        splashTagline.setText("Hausa Entertainment");
+        splashTagline.setTextColor(Color.rgb(0, 76, 63));
+        splashTagline.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        splashTagline.setGravity(Gravity.CENTER);
+        splashTagline.setLetterSpacing(0.04f);
+        splashTagline.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        LinearLayout.LayoutParams taglineParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        taglineParams.bottomMargin = dp(24);
+        splashContent.addView(splashTagline, taglineParams);
 
         splashProgressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         splashProgressBar.setMax(100);
@@ -583,12 +601,72 @@ public class MainActivity extends Activity {
     }
 
     private void startDownload(String url, String userAgent, String contentDisposition, String mimeType) {
+        if (url == null || url.trim().isEmpty()) {
+            Toast.makeText(this, "Download link is empty", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final String originalUrl = url.trim();
+        final String safeUserAgent = userAgent != null ? userAgent : ("KBMoviesAndroid/" + BuildConfig.VERSION_NAME);
+        CookieManager.getInstance().flush();
+        String currentCookies = CookieManager.getInstance().getCookie(originalUrl);
+        if (currentCookies == null || currentCookies.trim().isEmpty()) {
+            currentCookies = CookieManager.getInstance().getCookie(SITE_ORIGIN);
+        }
+        final String authCookies = currentCookies;
+        Toast.makeText(this, "Preparing download…", Toast.LENGTH_SHORT).show();
+
+        new Thread(() -> {
+            String resolvedUrl = resolveDownloadRedirect(originalUrl, safeUserAgent, authCookies);
+            runOnUiThread(() -> enqueueDownload(
+                    resolvedUrl != null && !resolvedUrl.trim().isEmpty() ? resolvedUrl : originalUrl,
+                    safeUserAgent,
+                    contentDisposition,
+                    mimeType
+            ));
+        }, "kb-download-resolver").start();
+    }
+
+    private String resolveDownloadRedirect(String originalUrl, String userAgent, String authCookies) {
+        Uri original = Uri.parse(originalUrl);
+        String host = original.getHost() == null ? "" : original.getHost().toLowerCase(Locale.US);
+        boolean needsAuthorizationRedirect = host.equals("kbmovies.ng")
+                || host.equals("www.kbmovies.ng")
+                || originalUrl.contains("mkmc_download_movie");
+
+        if (!needsAuthorizationRedirect) return originalUrl;
+
+        HttpURLConnection connection = null;
         try {
-            if (url == null || url.trim().isEmpty()) {
-                Toast.makeText(this, "Download link is empty", Toast.LENGTH_SHORT).show();
-                return;
+            connection = (HttpURLConnection) new URL(originalUrl).openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.setRequestProperty("User-Agent", userAgent);
+            connection.setRequestProperty("Accept", "video/*,application/octet-stream,*/*");
+
+            if (authCookies != null && !authCookies.trim().isEmpty()) {
+                connection.setRequestProperty("Cookie", authCookies);
             }
 
+            int code = connection.getResponseCode();
+            if (code >= 300 && code < 400) {
+                String location = connection.getHeaderField("Location");
+                if (location != null && !location.trim().isEmpty()) {
+                    return new URL(new URL(originalUrl), location.trim()).toString();
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Could not pre-resolve download URL; using original URL", e);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+        return originalUrl;
+    }
+
+    private void enqueueDownload(String url, String userAgent, String contentDisposition, String mimeType) {
+        try {
             String safeMimeType = (mimeType == null || mimeType.trim().isEmpty()) ? guessMimeTypeFromUrl(url) : mimeType;
             if (safeMimeType == null || safeMimeType.trim().isEmpty()) safeMimeType = "application/octet-stream";
 
@@ -599,8 +677,8 @@ public class MainActivity extends Activity {
             request.addRequestHeader("Accept", "video/*,application/octet-stream,*/*");
 
             String cookies = CookieManager.getInstance().getCookie(url);
-            if (cookies == null && url.contains("wordpress-1655282-6615038.cloudwaysapps.com")) {
-                cookies = CookieManager.getInstance().getCookie("https://wordpress-1655282-6615038.cloudwaysapps.com/");
+            if (cookies == null || cookies.trim().isEmpty()) {
+                cookies = CookieManager.getInstance().getCookie(SITE_ORIGIN);
             }
             if (cookies != null && !cookies.trim().isEmpty()) {
                 request.addRequestHeader("Cookie", cookies);

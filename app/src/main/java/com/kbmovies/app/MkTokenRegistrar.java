@@ -17,7 +17,7 @@ import java.nio.charset.StandardCharsets;
 
 public final class MkTokenRegistrar {
     private static final String TAG = "KBMoviesFCM";
-    private static final String REGISTER_ENDPOINT = "https://wordpress-1655282-6615038.cloudwaysapps.com/wp-json/mkpush/v2/register-token";
+    private static final String REGISTER_ENDPOINT = "https://kbmovies.ng/wp-json/mkpush/v2/register-token";
     private static final String PREFS = "kb_movies_fcm_registration";
     private static final String KEY_TOKEN = "last_token";
     private static final String KEY_VERSION = "last_version";

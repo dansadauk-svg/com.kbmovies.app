@@ -40,7 +40,7 @@ public class MkFirebaseMessagingService extends FirebaseMessagingService {
 
         String title = value(data, "title", "KB Movies");
         String body = value(data, "body", "New update available");
-        String url = value(data, "url", "https://wordpress-1655282-6615038.cloudwaysapps.com/");
+        String url = value(data, "url", "https://kbmovies.ng/");
         String imageUrl = firstValue(data,
                 "image", "image_url", "imageUrl", "poster", "poster_url",
                 "movie_poster", "movie_poster_url", "big_picture", "bigPicture",
@@ -97,7 +97,7 @@ public class MkFirebaseMessagingService extends FirebaseMessagingService {
             return;
         }
 
-        String openUrl = (url == null || url.trim().isEmpty()) ? "https://wordpress-1655282-6615038.cloudwaysapps.com/" : url.trim();
+        String openUrl = (url == null || url.trim().isEmpty()) ? "https://kbmovies.ng/" : url.trim();
         Intent intent = new Intent(this, MainActivity.class);
         intent.setAction(Intent.ACTION_VIEW);
         intent.setData(Uri.parse(openUrl));
