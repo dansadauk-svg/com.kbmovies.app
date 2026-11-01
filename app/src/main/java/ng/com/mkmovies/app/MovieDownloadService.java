@@ -1,0 +1,433 @@
+package ng.com.mkmovies.app;
+
+import android.app.DownloadManager;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.content.ContentValues;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.os.IBinder;
+import android.os.ParcelFileDescriptor;
+import android.provider.MediaStore;
+import android.util.Log;
+
+import androidx.annotation.Nullable;
+import androidx.core.app.NotificationCompat;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.RandomAccessFile;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/** Native resumable foreground downloader with Pause/Resume and Cancel controls. */
+public class MovieDownloadService extends Service {
+    private static final String TAG = "KBMovieDownload";
+    private static final String ACTION_START = "ng.com.mkmovies.app.action.START_MOVIE_DOWNLOAD";
+    private static final String ACTION_PAUSE = "ng.com.mkmovies.app.action.PAUSE_MOVIE_DOWNLOAD";
+    private static final String ACTION_RESUME = "ng.com.mkmovies.app.action.RESUME_MOVIE_DOWNLOAD";
+    private static final String ACTION_CANCEL = "ng.com.mkmovies.app.action.CANCEL_MOVIE_DOWNLOAD";
+    private static final String EXTRA_URL = "url";
+    private static final String EXTRA_FILENAME = "filename";
+    private static final String EXTRA_MIME = "mime";
+    private static final String EXTRA_USER_AGENT = "user_agent";
+    private static final String EXTRA_COOKIES = "cookies";
+    private static final String EXTRA_REFERER = "referer";
+    public static final String CHANNEL_ID = "kb_movie_downloads_v3";
+    private static final int NOTIFICATION_ID = 4301;
+    private static final String PREFS = "kb_movie_download_state";
+
+    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean pauseRequested = new AtomicBoolean(false);
+    private final AtomicBoolean cancelRequested = new AtomicBoolean(false);
+    private volatile boolean running;
+    private volatile HttpURLConnection activeConnection;
+    private NotificationManager notifications;
+    private SharedPreferences state;
+
+    public static void start(Context context, String url, String filename, String mimeType,
+                             String userAgent, String cookies, String referer) {
+        Intent intent = new Intent(context, MovieDownloadService.class)
+                .setAction(ACTION_START).putExtra(EXTRA_URL, url)
+                .putExtra(EXTRA_FILENAME, filename).putExtra(EXTRA_MIME, mimeType)
+                .putExtra(EXTRA_USER_AGENT, userAgent).putExtra(EXTRA_COOKIES, cookies)
+                .putExtra(EXTRA_REFERER, referer);
+        startServiceCompat(context, intent);
+    }
+
+    private static void startServiceCompat(Context context, Intent intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent);
+        else context.startService(intent);
+    }
+
+    @Override public void onCreate() {
+        super.onCreate();
+        notifications = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        state = getSharedPreferences(PREFS, MODE_PRIVATE);
+        createNotificationChannel();
+    }
+
+    @Override public int onStartCommand(@Nullable Intent intent, int flags, int startId) {
+        String action = intent == null ? "" : safe(intent.getAction());
+        if (ACTION_CANCEL.equals(action)) { cancelDownload(); return START_NOT_STICKY; }
+        if (ACTION_PAUSE.equals(action)) { pauseDownload(); return START_NOT_STICKY; }
+        if (ACTION_RESUME.equals(action)) {
+            if (!state.contains(EXTRA_URL)) { stopSelf(); return START_NOT_STICKY; }
+            state.edit().putString("status", "running").apply();
+            beginDownload();
+            return START_REDELIVER_INTENT;
+        }
+        if (ACTION_START.equals(action) && intent != null) {
+            if (running || "running".equals(state.getString("status", ""))) {
+                startForeground(NOTIFICATION_ID, buildRunningNotification());
+                return START_REDELIVER_INTENT;
+            }
+            clearStateAndPartial();
+            state.edit().putString(EXTRA_URL, safe(intent.getStringExtra(EXTRA_URL)))
+                    .putString(EXTRA_FILENAME, safe(intent.getStringExtra(EXTRA_FILENAME)))
+                    .putString(EXTRA_MIME, safe(intent.getStringExtra(EXTRA_MIME)))
+                    .putString(EXTRA_USER_AGENT, safe(intent.getStringExtra(EXTRA_USER_AGENT)))
+                    .putString(EXTRA_COOKIES, safe(intent.getStringExtra(EXTRA_COOKIES)))
+                    .putString(EXTRA_REFERER, safe(intent.getStringExtra(EXTRA_REFERER)))
+                    .putLong("downloaded", 0L).putLong("total", 0L)
+                    .putString("status", "running").apply();
+            if (state.getString(EXTRA_URL, "").isEmpty() || state.getString(EXTRA_FILENAME, "").isEmpty()) {
+                showFailure("Download link or movie name is missing.");
+                return START_NOT_STICKY;
+            }
+            beginDownload();
+            return START_REDELIVER_INTENT;
+        }
+        stopSelf(startId);
+        return START_NOT_STICKY;
+    }
+
+    private synchronized void beginDownload() {
+        if (running) return;
+        pauseRequested.set(false);
+        cancelRequested.set(false);
+        running = true;
+        startForeground(NOTIFICATION_ID, buildRunningNotification());
+        worker.execute(this::download);
+    }
+
+    private void download() {
+        try {
+            ensureDestination(state.getString(EXTRA_FILENAME, "movie.mp4"),
+                    state.getString(EXTRA_MIME, "video/mp4"));
+            long downloaded = currentOutputSize();
+            state.edit().putLong("downloaded", downloaded).apply();
+            HttpURLConnection connection = (HttpURLConnection) new URL(state.getString(EXTRA_URL, "")).openConnection();
+            activeConnection = connection;
+            connection.setConnectTimeout(20000);
+            connection.setReadTimeout(30000);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("Accept", "video/*,application/octet-stream,*/*");
+            setHeader(connection, "User-Agent", state.getString(EXTRA_USER_AGENT, ""));
+            setHeader(connection, "Cookie", state.getString(EXTRA_COOKIES, ""));
+            setHeader(connection, "Referer", state.getString(EXTRA_REFERER, ""));
+            if (downloaded > 0L) connection.setRequestProperty("Range", "bytes=" + downloaded + "-");
+            connection.connect();
+            int response = connection.getResponseCode();
+            if (response == 416) {
+                long knownTotal = state.getLong("total", 0L);
+                if (knownTotal > 0L && downloaded >= knownTotal) { finishSuccess(); return; }
+                throw new IOException("The server rejected the saved download position");
+            }
+            if (response < 200 || response >= 300) throw new IOException("HTTP " + response);
+            boolean resumed = downloaded > 0L && response == HttpURLConnection.HTTP_PARTIAL;
+            if (downloaded > 0L && !resumed) { truncateOutput(); downloaded = 0L; }
+            long responseLength = connection.getContentLengthLong();
+            long total = responseLength > 0L ? downloaded + responseLength : 0L;
+            state.edit().putLong("downloaded", downloaded).putLong("total", total).apply();
+            try (InputStream input = connection.getInputStream(); OutputHandle output = openOutput(downloaded)) {
+                byte[] buffer = new byte[64 * 1024];
+                long lastNotify = 0L;
+                long written = downloaded;
+                while (true) {
+                    if (cancelRequested.get()) return;
+                    if (pauseRequested.get()) {
+                        state.edit().putLong("downloaded", written).putString("status", "paused").apply();
+                        showPaused();
+                        return;
+                    }
+                    int count = input.read(buffer);
+                    if (count < 0) break;
+                    output.write(buffer, 0, count);
+                    written += count;
+                    long now = System.currentTimeMillis();
+                    if (now - lastNotify >= 650L) {
+                        state.edit().putLong("downloaded", written).putLong("total", total).apply();
+                        notifications.notify(NOTIFICATION_ID, buildRunningNotification());
+                        lastNotify = now;
+                    }
+                }
+                state.edit().putLong("downloaded", written).putLong("total", total).apply();
+            }
+            finishSuccess();
+        } catch (Exception error) {
+            if (!pauseRequested.get() && !cancelRequested.get()) {
+                Log.e(TAG, "Movie download failed", error);
+                state.edit().putString("status", "failed").apply();
+                showFailure("Download failed. Check your connection, then tap the movie to try again.");
+            }
+        } finally {
+            HttpURLConnection connection = activeConnection;
+            activeConnection = null;
+            if (connection != null) connection.disconnect();
+            running = false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_DETACH);
+            else stopForeground(false);
+            stopSelf();
+        }
+    }
+
+    private void pauseDownload() {
+        pauseRequested.set(true);
+        state.edit().putString("status", "paused").apply();
+        HttpURLConnection connection = activeConnection;
+        if (connection != null) connection.disconnect();
+        showPaused();
+        if (!running) stopSelf();
+    }
+
+    private void cancelDownload() {
+        cancelRequested.set(true);
+        HttpURLConnection connection = activeConnection;
+        if (connection != null) connection.disconnect();
+        deleteDestination();
+        state.edit().clear().apply();
+        notifications.cancel(NOTIFICATION_ID);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE);
+        else stopForeground(true);
+        stopSelf();
+    }
+
+    private void finishSuccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            String uriString = state.getString("uri", "");
+            if (!uriString.isEmpty()) {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                getContentResolver().update(Uri.parse(uriString), values, null, null);
+            }
+        }
+        String title = displayTitle(state.getString(EXTRA_FILENAME, "Movie"));
+        state.edit().clear().apply();
+        notifications.notify(NOTIFICATION_ID, baseBuilder().setContentTitle(title + " downloaded")
+                .setContentText("Saved in Downloads/KB Movies").setContentIntent(openDownloadsIntent())
+                .setProgress(0, 0, false).setOngoing(false).setAutoCancel(true).build());
+    }
+
+    private Notification buildRunningNotification() {
+        String filename = state.getString(EXTRA_FILENAME, "Movie");
+        long downloaded = state.getLong("downloaded", 0L);
+        long total = state.getLong("total", 0L);
+        NotificationCompat.Builder builder = baseBuilder()
+                .setContentTitle("Downloading " + displayTitle(filename))
+                .setContentText(formatProgress(downloaded, total)).setContentIntent(openDownloadsIntent())
+                .setOnlyAlertOnce(true).setOngoing(true)
+                .addAction(android.R.drawable.ic_media_pause, "Pause", serviceAction(ACTION_PAUSE, 11))
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", serviceAction(ACTION_CANCEL, 12));
+        if (total > 0L) builder.setProgress(100, (int) Math.min(100L, downloaded * 100L / total), false);
+        else builder.setProgress(0, 0, true);
+        return builder.build();
+    }
+
+    private void showPaused() {
+        String filename = state.getString(EXTRA_FILENAME, "Movie");
+        Notification notification = baseBuilder().setContentTitle(displayTitle(filename) + " paused")
+                .setContentText(formatProgress(state.getLong("downloaded", 0L), state.getLong("total", 0L)))
+                .setContentIntent(openDownloadsIntent()).setOnlyAlertOnce(true).setOngoing(false)
+                .addAction(android.R.drawable.ic_media_play, "Resume", serviceAction(ACTION_RESUME, 13))
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", serviceAction(ACTION_CANCEL, 14)).build();
+        notifications.notify(NOTIFICATION_ID, notification);
+    }
+
+    private void showFailure(String message) {
+        String filename = state.getString(EXTRA_FILENAME, "Movie");
+        notifications.notify(NOTIFICATION_ID, baseBuilder()
+                .setContentTitle("Couldn’t download " + displayTitle(filename)).setContentText(message)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
+                .setContentIntent(openAppIntent()).setOngoing(false).setAutoCancel(true).build());
+    }
+
+    private NotificationCompat.Builder baseBuilder() {
+        return new NotificationCompat.Builder(this, CHANNEL_ID).setSmallIcon(R.drawable.ic_stat_mk)
+                .setCategory(NotificationCompat.CATEGORY_PROGRESS).setPriority(NotificationCompat.PRIORITY_LOW)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+    }
+
+    private PendingIntent serviceAction(String action, int requestCode) {
+        return PendingIntent.getService(this, requestCode,
+                new Intent(this, MovieDownloadService.class).setAction(action),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private PendingIntent openDownloadsIntent() {
+        return PendingIntent.getActivity(this, 20, new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private PendingIntent openAppIntent() {
+        Intent intent = new Intent(this, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        return PendingIntent.getActivity(this, 21, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private void ensureDestination(String filename, String mime) throws IOException {
+        if (!state.getString("uri", "").isEmpty() || !state.getString("path", "").isEmpty()) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, filename);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, mime.isEmpty() ? "video/mp4" : mime);
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/KB Movies");
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) throw new IOException("Android could not create the download file");
+            state.edit().putString("uri", uri.toString()).apply();
+        } else {
+            File folder = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "KB Movies");
+            if (!folder.exists() && !folder.mkdirs()) throw new IOException("Could not create Downloads/KB Movies");
+            state.edit().putString("path", uniqueFile(folder, filename).getAbsolutePath()).apply();
+        }
+    }
+
+    private OutputHandle openOutput(long position) throws IOException {
+        String uriString = state.getString("uri", "");
+        if (!uriString.isEmpty()) {
+            ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(Uri.parse(uriString), "rw");
+            if (pfd == null) throw new IOException("Could not open Android download file");
+            FileOutputStream stream = new FileOutputStream(pfd.getFileDescriptor());
+            stream.getChannel().position(position);
+            return new OutputHandle(stream, pfd);
+        }
+        RandomAccessFile file = new RandomAccessFile(state.getString("path", ""), "rw");
+        file.seek(position);
+        return new OutputHandle(file);
+    }
+
+    private long currentOutputSize() {
+        try {
+            String uriString = state.getString("uri", "");
+            if (!uriString.isEmpty()) {
+                try (ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(Uri.parse(uriString), "r")) {
+                    return pfd == null ? 0L : pfd.getStatSize();
+                }
+            }
+            File file = new File(state.getString("path", ""));
+            return file.exists() ? file.length() : 0L;
+        } catch (Exception ignored) { return state.getLong("downloaded", 0L); }
+    }
+
+    private void truncateOutput() throws IOException {
+        try (OutputHandle output = openOutput(0L)) { output.truncate(); }
+        state.edit().putLong("downloaded", 0L).apply();
+    }
+
+    private void clearStateAndPartial() {
+        if (state.contains(EXTRA_URL)) deleteDestination();
+        state.edit().clear().apply();
+    }
+
+    private void deleteDestination() {
+        try {
+            String uriString = state.getString("uri", "");
+            if (!uriString.isEmpty()) getContentResolver().delete(Uri.parse(uriString), null, null);
+            String path = state.getString("path", "");
+            if (!path.isEmpty()) new File(path).delete();
+        } catch (Exception error) { Log.w(TAG, "Could not delete partial movie", error); }
+    }
+
+    private static File uniqueFile(File folder, String filename) {
+        File candidate = new File(folder, filename);
+        if (!candidate.exists()) return candidate;
+        int dot = filename.lastIndexOf('.');
+        String base = dot > 0 ? filename.substring(0, dot) : filename;
+        String ext = dot > 0 ? filename.substring(dot) : "";
+        for (int i = 1; i < 1000; i++) {
+            candidate = new File(folder, base + " (" + i + ")" + ext);
+            if (!candidate.exists()) return candidate;
+        }
+        return new File(folder, base + "-" + System.currentTimeMillis() + ext);
+    }
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Movie downloads", NotificationManager.IMPORTANCE_LOW);
+        channel.setDescription("Movie download progress and controls");
+        channel.setSound(null, null);
+        channel.enableVibration(false);
+        notifications.createNotificationChannel(channel);
+    }
+
+    private static void setHeader(HttpURLConnection connection, String name, String value) {
+        if (value != null && !value.isEmpty()) connection.setRequestProperty(name, value);
+    }
+
+    private static String displayTitle(String filename) {
+        if (filename == null || filename.trim().isEmpty()) return "Movie";
+        String title = filename.trim();
+        int dot = title.lastIndexOf('.');
+        if (dot > 0) title = title.substring(0, dot);
+        return title.replace('_', ' ').replace('-', ' ').replaceAll("\\s+", " ").trim();
+    }
+
+    private static String formatProgress(long downloaded, long total) {
+        if (total > 0L) return String.format(Locale.US, "%d%% • %s of %s",
+                Math.min(100L, downloaded * 100L / total), formatBytes(downloaded), formatBytes(total));
+        return downloaded > 0L ? formatBytes(downloaded) + " downloaded" : "Preparing download…";
+    }
+
+    private static String formatBytes(long bytes) {
+        if (bytes >= 1024L * 1024L * 1024L) return String.format(Locale.US, "%.2f GB", bytes / (1024d * 1024d * 1024d));
+        if (bytes >= 1024L * 1024L) return String.format(Locale.US, "%.1f MB", bytes / (1024d * 1024d));
+        if (bytes >= 1024L) return String.format(Locale.US, "%.0f KB", bytes / 1024d);
+        return bytes + " B";
+    }
+
+    private static String safe(String value) { return value == null ? "" : value.trim(); }
+    @Nullable @Override public IBinder onBind(Intent intent) { return null; }
+
+    @Override public void onDestroy() {
+        worker.shutdownNow();
+        super.onDestroy();
+    }
+
+    private static final class OutputHandle implements AutoCloseable {
+        private final FileOutputStream stream;
+        private final RandomAccessFile random;
+        private final ParcelFileDescriptor descriptor;
+        OutputHandle(FileOutputStream stream, ParcelFileDescriptor descriptor) {
+            this.stream = stream; this.descriptor = descriptor; this.random = null;
+        }
+        OutputHandle(RandomAccessFile random) {
+            this.stream = null; this.descriptor = null; this.random = random;
+        }
+        void write(byte[] bytes, int offset, int count) throws IOException {
+            if (stream != null) stream.write(bytes, offset, count); else random.write(bytes, offset, count);
+        }
+        void truncate() throws IOException {
+            if (stream != null) stream.getChannel().truncate(0L); else random.setLength(0L);
+        }
+        @Override public void close() throws IOException {
+            if (stream != null) stream.close();
+            if (random != null) random.close();
+            if (descriptor != null) descriptor.close();
+        }
+    }
+}

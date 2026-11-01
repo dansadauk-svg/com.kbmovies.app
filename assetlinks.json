@@ -3,9 +3,9 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.kbmovies.app",
+      "package_name": "ng.com.mkmovies.app",
       "sha256_cert_fingerprints": [
-        "85:04:7D:26:88:57:F2:54:0F:5A:B1:D8:0D:0E:1A:3E:89:D0:E8:E8:38:C2:B8:C8:CB:41:7F:E9:21:5C:9B:A0"
+        "D0:59:BA:06:7D:B3:67:EA:FB:4B:84:36:E1:5C:15:F9:F6:7D:98:DD:9E:D7:9E:90:8C:41:77:BF:32:A7:1B:0C"
       ]
     }
   }
