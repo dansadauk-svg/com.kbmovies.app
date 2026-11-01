@@ -69,10 +69,11 @@ jobs:
         run: |
           grep -Eq '^[[:space:]]*compileSdk[[:space:]]+36([[:space:]]|$)' app/build.gradle || { echo "::error::compileSdk must be 36"; exit 1; }
           grep -Eq '^[[:space:]]*targetSdk[[:space:]]+36([[:space:]]|$)' app/build.gradle || { echo "::error::targetSdk must be 36"; exit 1; }
+          grep -Eq '^[[:space:]]*minSdk[[:space:]]+24([[:space:]]|$)' app/build.gradle || { echo "::error::minSdk must be 24 for Google Play automatic protection"; exit 1; }
           grep -Eq '^[[:space:]]*versionCode[[:space:]]+22([[:space:]]|$)' app/build.gradle || { echo "::error::versionCode must be 22"; exit 1; }
           grep -Eq "^[[:space:]]*versionName[[:space:]]+'2\\.10\\.1'([[:space:]]|$)" app/build.gradle || { echo "::error::versionName must be 2.10.1"; exit 1; }
           grep -Fq "applicationId 'com.kbmovies.app'" app/build.gradle || { echo "::error::applicationId must remain com.kbmovies.app"; exit 1; }
-          echo "Verified KB Movies v2.10.1 (22), API 36."
+          echo "Verified KB Movies v2.10.1 (22), minSdk 24, API 36."
 
       - name: Prepare signing key
         env:
