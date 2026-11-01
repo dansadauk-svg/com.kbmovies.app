@@ -374,7 +374,8 @@ public class MainActivity extends Activity {
         webView.setDownloadListener(new DownloadListener() {
             @Override
             public void onDownloadStart(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
-                startDownload(url, userAgent, contentDisposition, mimeType);
+                startDownload(url, userAgent, contentDisposition, mimeType,
+                        webView != null ? webView.getTitle() : "");
             }
         });
 
@@ -446,13 +447,14 @@ public class MainActivity extends Activity {
 
     private class MovieDownloadBridge {
         @JavascriptInterface
-        public void startMovieDownload(final String url) {
+        public void startMovieDownload(final String url, final String movieTitle) {
             if (url == null || url.trim().isEmpty()) return;
             runOnUiThread(() -> startDownload(
                     url,
                     webView != null ? webView.getSettings().getUserAgentString() : "KBMoviesAndroid/" + BuildConfig.VERSION_NAME,
                     "attachment",
-                    guessMimeTypeFromUrl(url)
+                    guessMimeTypeFromUrl(url),
+                    movieTitle
             ));
         }
     }
@@ -475,11 +477,20 @@ public class MainActivity extends Activity {
                 + "|| h.indexOf('action=mkmc_download_movie')!==-1"
                 + "|| h.indexOf('response-content-disposition=')!==-1;"
                 + "}"
+                + "function text(el){return el&&el.textContent?el.textContent.trim():'';}"
+                + "function movieTitle(a){"
+                + "var v=a.getAttribute('download')||a.getAttribute('data-filename')||a.getAttribute('data-movie-title')||a.getAttribute('data-title')||'';"
+                + "if(v&&v.toLowerCase()!=='download')return v;"
+                + "var card=a.closest&&a.closest('article,.movie,.movie-card,.mkmc-movie-card,.post,.entry,.mk-watch-white');"
+                + "var n=card&&card.querySelector('.movie-title,.entry-title,.mkmc-title,.mk-watch-white__title,h1,h2,h3');"
+                + "v=text(n);if(v)return v;"
+                + "return text(document.querySelector('.mk-watch-white__title,.mkmc-watch-title,.entry-title,h1'))||document.title||'KB Movies movie';"
+                + "}"
                 + "document.addEventListener('click',function(e){"
                 + "var a=e.target&&e.target.closest?e.target.closest('a'):null;"
                 + "if(!isDownloadLink(a))return;"
                 + "e.preventDefault();e.stopPropagation();"
-                + "try{window.KBMoviesAndroidBridge.startMovieDownload(a.href);}catch(err){window.location.href=a.href;}"
+                + "try{window.KBMoviesAndroidBridge.startMovieDownload(a.href,movieTitle(a));}catch(err){window.location.href=a.href;}"
                 + "},true);"
                 + "})();";
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
@@ -534,7 +545,8 @@ public class MainActivity extends Activity {
                         uri.toString(),
                 webView != null ? webView.getSettings().getUserAgentString() : "KBMoviesAndroid/" + BuildConfig.VERSION_NAME,
                         "attachment",
-                        guessMimeTypeFromUrl(uri.toString())
+                        guessMimeTypeFromUrl(uri.toString()),
+                        webView != null ? webView.getTitle() : ""
                 );
                 return true;
             }
@@ -565,8 +577,12 @@ public class MainActivity extends Activity {
         return "application/octet-stream";
     }
 
-    private String cleanDownloadFilename(String url, String contentDisposition, String mimeType) {
-        String filename = URLUtil.guessFileName(url, contentDisposition, mimeType);
+    private String cleanDownloadFilename(String url, String contentDisposition, String mimeType, String requestedTitle) {
+        String filename = requestedTitle == null ? "" : requestedTitle.trim();
+        filename = filename.replaceAll("(?i)\\s*[|–—-]\\s*KB\\s*Movies.*$", "").trim();
+        if (filename.equalsIgnoreCase("KB Movies") || filename.equalsIgnoreCase("download")) filename = "";
+        if (!filename.isEmpty()) filename = filename.replaceAll("[\\\\/:*?\"<>|]", "-");
+        if (filename.isEmpty()) filename = URLUtil.guessFileName(url, contentDisposition, mimeType);
         if (filename != null) filename = filename.trim();
 
         if (filename == null
@@ -600,7 +616,7 @@ public class MainActivity extends Activity {
         return filename;
     }
 
-    private void startDownload(String url, String userAgent, String contentDisposition, String mimeType) {
+    private void startDownload(String url, String userAgent, String contentDisposition, String mimeType, String requestedTitle) {
         if (url == null || url.trim().isEmpty()) {
             Toast.makeText(this, "Download link is empty", Toast.LENGTH_SHORT).show();
             return;
@@ -622,7 +638,8 @@ public class MainActivity extends Activity {
                     resolvedUrl != null && !resolvedUrl.trim().isEmpty() ? resolvedUrl : originalUrl,
                     safeUserAgent,
                     contentDisposition,
-                    mimeType
+                    mimeType,
+                    requestedTitle
             ));
         }, "kb-download-resolver").start();
     }
@@ -665,46 +682,28 @@ public class MainActivity extends Activity {
         return originalUrl;
     }
 
-    private void enqueueDownload(String url, String userAgent, String contentDisposition, String mimeType) {
+    private void enqueueDownload(String url, String userAgent, String contentDisposition, String mimeType, String requestedTitle) {
         try {
             String safeMimeType = (mimeType == null || mimeType.trim().isEmpty()) ? guessMimeTypeFromUrl(url) : mimeType;
             if (safeMimeType == null || safeMimeType.trim().isEmpty()) safeMimeType = "application/octet-stream";
 
-            String filename = cleanDownloadFilename(url, contentDisposition, safeMimeType);
-            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-            request.setMimeType(safeMimeType);
-            request.addRequestHeader("User-Agent", userAgent != null ? userAgent : ("KBMoviesAndroid/" + BuildConfig.VERSION_NAME));
-            request.addRequestHeader("Accept", "video/*,application/octet-stream,*/*");
-
+            String filename = cleanDownloadFilename(url, contentDisposition, safeMimeType, requestedTitle);
             String cookies = CookieManager.getInstance().getCookie(url);
             if (cookies == null || cookies.trim().isEmpty()) {
                 cookies = CookieManager.getInstance().getCookie(SITE_ORIGIN);
             }
-            if (cookies != null && !cookies.trim().isEmpty()) {
-                request.addRequestHeader("Cookie", cookies);
-            }
-
-            request.setTitle(filename);
-            request.setDescription("Downloading movie from KB Movies");
-            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI | DownloadManager.Request.NETWORK_MOBILE);
-            request.setAllowedOverMetered(true);
-            request.setAllowedOverRoaming(true);
-            request.allowScanningByMediaScanner();
-
-            try {
-                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
-            } catch (Exception e) {
-                request.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, filename);
-            }
-
-            DownloadManager manager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-            if (manager != null) {
-                manager.enqueue(request);
-                Toast.makeText(this, "Download started. Check your Downloads.", Toast.LENGTH_LONG).show();
-            } else {
-                Toast.makeText(this, "Download manager is not available", Toast.LENGTH_SHORT).show();
-            }
+            String referer = webView != null && webView.getUrl() != null
+                    ? webView.getUrl() : SITE_ORIGIN;
+            MovieDownloadService.start(
+                    getApplicationContext(),
+                    url,
+                    filename,
+                    safeMimeType,
+                    userAgent != null ? userAgent : ("KBMoviesAndroid/" + BuildConfig.VERSION_NAME),
+                    cookies,
+                    referer
+            );
+            Toast.makeText(this, "Downloading " + filename, Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             Log.w(TAG, "Movie download failed", e);
             Toast.makeText(this, "Download failed. Please try again.", Toast.LENGTH_LONG).show();

@@ -1,8 +1,8 @@
 {
-  "packageId": "ng.com.mkmovies.app",
-  "host": "mkmovies.com.ng",
-  "name": "MK Movies",
-  "launcherName": "MK Movies",
+  "packageId": "com.kbmovies.app",
+  "host": "kbmovies.ng",
+  "name": "KB Movies",
+  "launcherName": "KB Movies",
   "display": "standalone",
   "themeColor": "#ffffff",
   "themeColorDark": "#ffffff",
@@ -13,18 +13,18 @@
   "backgroundColor": "#ffffff",
   "enableNotifications": true,
   "startUrl": "/?source=twa",
-  "iconUrl": "https://mkmovies.com.ng/wp-content/plugins/mk-movies-pwa/assets/icon-512.png",
-  "maskableIconUrl": "https://mkmovies.com.ng/wp-content/plugins/mk-movies-pwa/assets/icon-512-maskable.png",
+  "iconUrl": "https://kbmovies.ng/wp-content/uploads/kb-movies-icon-512.png",
+  "maskableIconUrl": "https://kbmovies.ng/wp-content/uploads/kb-movies-icon-512.png",
   "splashScreenFadeOutDuration": 300,
   "signingKey": {
-    "path": "mk-movies-release-key.jks",
-    "alias": "mk_movies"
+    "path": "kb-movies-release-key.jks",
+    "alias": "kb_movies"
   },
-  "appVersionName": "2.9.1",
-  "appVersionCode": 20,
+  "appVersionName": "2.7.0",
+  "appVersionCode": 17,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
-  "webManifestUrl": "https://mkmovies.com.ng/mk-pwa-manifest.json",
+  "webManifestUrl": "https://kbmovies.ng/mk-pwa-manifest.json",
   "fallbackType": "customtabs",
   "features": {
     "locationDelegation": {
