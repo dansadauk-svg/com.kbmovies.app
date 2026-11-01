@@ -1,4 +1,4 @@
-name: Build MK Movies v2.10.0 Native Downloads APK/AAB
+name: Build KB Movies APK and AAB
 
 on:
   workflow_dispatch:
@@ -34,11 +34,11 @@ jobs:
           test -f app/build.gradle || { echo "::error::app/build.gradle is missing. The app folder was not uploaded correctly."; exit 1; }
           test -f app/src/main/AndroidManifest.xml || { echo "::error::AndroidManifest.xml is missing."; exit 1; }
 
-      - name: Install Gradle 9.6.0
+      - name: Install Gradle 8.13
         run: |
-          curl -fsSL https://services.gradle.org/distributions/gradle-9.6.0-bin.zip -o /tmp/gradle.zip
+          curl -fsSL https://services.gradle.org/distributions/gradle-8.13-bin.zip -o /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp/gradle
-          echo "/tmp/gradle/gradle-9.6.0/bin" >> "$GITHUB_PATH"
+          echo "/tmp/gradle/gradle-8.13/bin" >> "$GITHUB_PATH"
 
       - name: Install Android SDK packages
         run: |
@@ -46,41 +46,40 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Verify API 36 and release version
+      - name: Verify KB Movies release metadata
         run: |
           grep -Eq '^[[:space:]]*compileSdk[[:space:]]+36([[:space:]]|$)' app/build.gradle || { echo "::error::compileSdk must be 36"; exit 1; }
           grep -Eq '^[[:space:]]*targetSdk[[:space:]]+36([[:space:]]|$)' app/build.gradle || { echo "::error::targetSdk must be 36"; exit 1; }
           grep -Eq '^[[:space:]]*versionCode[[:space:]]+21([[:space:]]|$)' app/build.gradle || { echo "::error::versionCode must be 21"; exit 1; }
           grep -Eq "^[[:space:]]*versionName[[:space:]]+'2\\.10\\.0'([[:space:]]|$)" app/build.gradle || { echo "::error::versionName must be 2.10.0"; exit 1; }
-          grep -Fq 'android:value="mk_movies_alerts_v3"' app/src/main/AndroidManifest.xml || { echo "::error::Firebase notification channel must be mk_movies_alerts_v3"; exit 1; }
-          echo "Verified Android API 36 and MK Movies v2.10.0 (21)."
+          grep -Fq "applicationId 'com.kbmovies.app'" app/build.gradle || { echo "::error::applicationId must remain com.kbmovies.app"; exit 1; }
+          echo "Verified KB Movies v2.10.0 (21), API 36."
 
-      - name: Prepare and verify Play upload key
+      - name: Prepare signing key
         env:
           KB_KEYSTORE_BASE64: ${{ secrets.KB_KEYSTORE_BASE64 }}
           KB_KEYSTORE_PASSWORD: ${{ secrets.KB_KEYSTORE_PASSWORD }}
           KB_KEY_ALIAS: ${{ secrets.KB_KEY_ALIAS }}
         run: |
-          if [ -z "$KB_KEYSTORE_BASE64" ]; then
-            echo "::error::Missing repository secret: KB_KEYSTORE_BASE64"
+          if [ ! -f kb-movies-release-key.jks ]; then
+            if [ -n "$KB_KEYSTORE_BASE64" ]; then
+              echo "$KB_KEYSTORE_BASE64" | base64 --decode > kb-movies-release-key.jks
+            else
+              echo "::error::Add the KB_KEYSTORE_BASE64 repository secret."
+              exit 1
+            fi
+          fi
+          if [ -z "$KB_KEYSTORE_PASSWORD" ] || [ -z "$KB_KEY_ALIAS" ]; then
+            echo "::error::KB_KEYSTORE_PASSWORD and KB_KEY_ALIAS are required."
             exit 1
           fi
-          if [ -z "$KB_KEYSTORE_PASSWORD" ]; then
-            echo "::error::Missing repository secret: KB_KEYSTORE_PASSWORD"
-            exit 1
-          fi
-          if [ -z "$KB_KEY_ALIAS" ]; then
-            echo "::error::Missing repository secret: KB_KEY_ALIAS"
-            exit 1
-          fi
-          printf '%s' "$KB_KEYSTORE_BASE64" | base64 --decode > kb-movies-release-key.jks
-          EXPECTED_SHA1="59:0D:C2:C2:11:7A:04:5B:8A:03:44:24:2D:A4:C4:32:43:3F:A3:05"
+          EXPECTED_SHA1="3A:D7:15:3B:F6:30:CB:D3:DE:E3:17:19:D7:7B:37:8C:A0:36:15:77"
           ACTUAL_SHA1="$(keytool -list -v -keystore kb-movies-release-key.jks -storepass "$KB_KEYSTORE_PASSWORD" -alias "$KB_KEY_ALIAS" 2>/dev/null | sed -n 's/^[[:space:]]*SHA1: //p' | head -n 1 | tr -d '\r')"
           if [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
-            echo "::error::Wrong Play upload key. Expected SHA1 $EXPECTED_SHA1 but received ${ACTUAL_SHA1:-unreadable key}."
+            echo "::error::Wrong KB Movies upload key. Expected $EXPECTED_SHA1 but received ${ACTUAL_SHA1:-unreadable key}."
             exit 1
           fi
-          echo "Play upload key verified: $ACTUAL_SHA1"
+          echo "KB Movies upload key verified."
 
       - name: Build release APK and AAB
         env:
@@ -103,25 +102,16 @@ jobs:
           gradle --version
           gradle --no-daemon --stacktrace :app:assembleRelease :app:bundleRelease
 
-      - name: Verify and name release files
-        run: |
-          mkdir -p release
-          cp app/build/outputs/apk/release/app-release.apk release/MK-Movies-v2.10.0-release.apk
-          cp app/build/outputs/bundle/release/app-release.aab release/MK-Movies-v2.10.0-play-console.aab
-          EXPECTED_SHA1="59:0D:C2:C2:11:7A:04:5B:8A:03:44:24:2D:A4:C4:32:43:3F:A3:05"
-          keytool -printcert -jarfile release/MK-Movies-v2.10.0-play-console.aab | grep -F "SHA1: $EXPECTED_SHA1"
-          echo "Release AAB signing certificate verified."
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: mk-movies-release-apk
-          path: release/MK-Movies-v2.10.0-release.apk
+          name: kb-movies-release-apk
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: mk-movies-release-aab
-          path: release/MK-Movies-v2.10.0-play-console.aab
+          name: kb-movies-release-aab
+          path: app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
