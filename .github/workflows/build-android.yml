@@ -34,6 +34,25 @@ jobs:
           test -f app/build.gradle || { echo "::error::app/build.gradle is missing. The app folder was not uploaded correctly."; exit 1; }
           test -f app/src/main/AndroidManifest.xml || { echo "::error::AndroidManifest.xml is missing."; exit 1; }
 
+      - name: Remove stale MK Movies sources and verify KB package
+        run: |
+          # Older repository uploads left MK Movies Java files beside the KB
+          # Movies package. Android then compiled both packages, while R and
+          # BuildConfig were generated only for com.kbmovies.app.
+          rm -rf app/src/main/java/ng/com/mkmovies
+
+          KB_SOURCE="app/src/main/java/com/kbmovies/app"
+          test -f "$KB_SOURCE/MainActivity.java" || { echo "::error::KB Movies MainActivity.java is missing. Replace the repository with the complete KB Movies source archive."; exit 1; }
+          test -f "$KB_SOURCE/MovieDownloadService.java" || { echo "::error::KB Movies MovieDownloadService.java is missing."; exit 1; }
+          test -f "$KB_SOURCE/MkTokenRegistrar.java" || { echo "::error::KB Movies MkTokenRegistrar.java is missing."; exit 1; }
+          test -f "$KB_SOURCE/MkFirebaseMessagingService.java" || { echo "::error::KB Movies Firebase messaging service is missing."; exit 1; }
+
+          if rg -n "^(package|import) ng\\.com\\.mkmovies|ng\\.com\\.mkmovies\\.app" app/src/main app/build.gradle; then
+            echo "::error::Stale MK Movies package references remain in the Android app."
+            exit 1
+          fi
+          echo "Canonical KB Movies Java package verified."
+
       - name: Install Gradle 8.13
         run: |
           curl -fsSL https://services.gradle.org/distributions/gradle-8.13-bin.zip -o /tmp/gradle.zip
