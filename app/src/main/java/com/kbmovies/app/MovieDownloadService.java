@@ -46,7 +46,9 @@ public class MovieDownloadService extends Service {
     private static final String EXTRA_USER_AGENT = "user_agent";
     private static final String EXTRA_COOKIES = "cookies";
     private static final String EXTRA_REFERER = "referer";
-    public static final String CHANNEL_ID = "kb_movie_downloads_v3";
+    // Use a new channel ID because Android does not let an app raise the
+    // importance of an existing channel that was previously created silent.
+    public static final String CHANNEL_ID = "kb_movie_downloads_visible_v4";
     private static final int NOTIFICATION_ID = 4301;
     private static final String PREFS = "kb_movie_download_state";
 
@@ -267,7 +269,8 @@ public class MovieDownloadService extends Service {
 
     private NotificationCompat.Builder baseBuilder() {
         return new NotificationCompat.Builder(this, CHANNEL_ID).setSmallIcon(R.drawable.ic_stat_kb)
-                .setCategory(NotificationCompat.CATEGORY_PROGRESS).setPriority(NotificationCompat.PRIORITY_LOW)
+                .setCategory(NotificationCompat.CATEGORY_PROGRESS).setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(NotificationCompat.DEFAULT_SOUND | NotificationCompat.DEFAULT_VIBRATE)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
     }
 
@@ -368,10 +371,10 @@ public class MovieDownloadService extends Service {
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-        NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Movie downloads", NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("Movie download progress and controls");
-        channel.setSound(null, null);
-        channel.enableVibration(false);
+        NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Movie downloads", NotificationManager.IMPORTANCE_HIGH);
+        channel.setDescription("Visible movie download start, progress and controls");
+        channel.enableVibration(true);
+        channel.setShowBadge(true);
         notifications.createNotificationChannel(channel);
     }
 
