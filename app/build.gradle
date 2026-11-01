@@ -13,7 +13,7 @@ android {
 
     defaultConfig {
         applicationId 'com.kbmovies.app'
-        minSdk 23
+        minSdk 24
         targetSdk 36
         versionCode 22
         versionName '2.10.1'

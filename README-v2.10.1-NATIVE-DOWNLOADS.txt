@@ -3,6 +3,7 @@ KB Movies Android v2.10.1
 - Correct package: com.kbmovies.app
 - Correct website: https://kbmovies.ng
 - versionCode 22 / versionName 2.10.1
+- Minimum Android SDK 24 (Android 7.0), compatible with Google Play automatic protection
 - Native Android download progress notification
 - Visible and audible "download started" foreground notification using a new
   high-importance Android channel (required to replace the previous silent channel)
